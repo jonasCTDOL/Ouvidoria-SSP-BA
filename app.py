@@ -14,10 +14,11 @@ st.set_page_config(
 
 @st.cache_data(ttl=3600)
 def fetch_data_from_db():
-    """Conecta-se à base de dados MySQL usando os segredos e busca os dados."""
+    """Conecta-se à base de dados MySQL usando os segredos e busca todos os dados."""
     try:
         conn = mysql.connector.connect(**st.secrets["mysql"])
-        query = "SELECT * FROM colaboracoes WHERE created_at >= NOW() - INTERVAL 90 DAY;"
+        # ALTERAÇÃO: A query agora busca todos os registos, sem o limite de 90 dias.
+        query = "SELECT * FROM colaboracoes;"
         df = pd.read_sql(query, conn)
         conn.close()
         return df
@@ -58,9 +59,9 @@ def generate_insight_huggingface(prompt):
         st.error("Erro ao ler o token da API. Verifique a secção `[huggingface_api]` nos seus 'Secrets'.")
         return None
 
-    # Mensagens no formato de chat, como exigido pelos modelos
+    # ALTERAÇÃO: Instruções do sistema mais diretas para evitar respostas erradas.
     messages = [
-        {"role": "system", "content": "É um assistente de análise de dados. A sua tarefa é responder às perguntas do utilizador com base nos dados fornecidos, de forma clara e concisa."},
+        {"role": "system", "content": "É um assistente especialista em análise de dados. A sua única função é analisar os dados em formato CSV que o utilizador fornece e responder à pergunta dele. Baseie a sua resposta exclusivamente nos dados fornecidos. Não invente informações. Não gere código SQL. Analise os dados e resuma as suas descobertas em português."},
         {"role": "user", "content": prompt}
     ]
 
@@ -68,9 +69,9 @@ def generate_insight_huggingface(prompt):
         st.info(f"A testar o modelo de IA: {model_id}...")
         
         try:
-            # CORREÇÃO: Usando o cliente oficial com o método chat_completion
+            # Usando o cliente oficial com o método chat_completion
             client = InferenceClient(model=model_id, token=api_token)
-            response = client.chat_completion(messages=messages, max_tokens=512)
+            response = client.chat_completion(messages=messages, max_tokens=1024) # Aumentado para respostas mais profundas
             
             # Extrai a resposta da estrutura de conversação
             insight = response.choices[0].message.content
@@ -93,7 +94,8 @@ def generate_insight_huggingface(prompt):
 # --- INTERFACE DO UTILIZADOR (UI) ---
 
 st.title("💡 Assistente de Análise de Colaborações")
-st.markdown("Faça uma pergunta sobre as colaborações dos últimos 90 dias e a IA irá gerar um insight para si.")
+# ALTERAÇÃO: Texto atualizado para refletir a análise completa.
+st.markdown("Faça uma pergunta sobre o **histórico completo** de colaborações e a IA irá gerar um insight para si.")
 st.info("ℹ️ Esta demonstração usa modelos da comunidade Hugging Face. A primeira geração pode demorar mais enquanto o modelo é carregado.")
 
 default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum ('denuncia', 'sugestao', etc.)?"
@@ -103,14 +105,16 @@ if st.button("Gerar Insight"):
     if not user_question:
         st.warning("Por favor, digite uma pergunta para análise.")
     else:
-        with st.spinner("A conectar-se à base de dados..."):
+        with st.spinner("A conectar-se à base de dados e a buscar todo o histórico..."):
             dados_df = fetch_data_from_db()
 
         if dados_df is not None:
             if dados_df.empty:
-                st.info("Nenhum registo encontrado nos últimos 90 dias.")
+                st.info("Nenhum registo encontrado na base de dados.")
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registos encontrados.")
+                # ALTERAÇÃO: Adicionado aviso sobre o tamanho dos dados.
+                st.warning(f"A analisar o histórico completo de {len(dados_df)} colaborações. A geração da resposta pode demorar mais tempo.")
                 
                 with st.spinner("A contactar os modelos de IA do Hugging Face..."):
                     prompt = build_user_prompt(user_question, dados_df)
