@@ -1,4 +1,6 @@
 streamlit
 mysql-connector-python
 pandas
+SQLAlchemy
 requests
+huggingface_hub
