@@ -43,22 +43,17 @@ def filter_relevant_data(df, question):
     Filtra o DataFrame para encontrar apenas os registos relevantes para a pergunta do utilizador.
     Se a pergunta for geral, retorna None para que um resumo seja usado.
     """
-    # Palavras-chave que indicam uma pergunta geral
     general_keywords = ['quantos', 'qual', 'resumo', 'geral', 'total', 'lista', 'liste', 'quais']
     if any(keyword in question.lower() for keyword in general_keywords):
-        return None # Indica que é uma pergunta geral
+        return None
 
-    # Extrai palavras-chave da pergunta
     keywords = set(re.findall(r'\b\w{3,}\b', question.lower()))
     
-    # Colunas onde procurar
     search_cols = ['descricao', 'observacoes', 'cidade', 'bairro', 'rua', 'tipo_colaboracao']
     
-    # Filtra o DataFrame
     mask = pd.Series([False] * len(df))
     for col in search_cols:
         if col in df.columns:
-            # Garante que a coluna é do tipo string e lida com valores nulos
             str_col = df[col].astype(str).str.lower()
             for keyword in keywords:
                 mask |= str_col.str.contains(keyword, na=False)
@@ -79,19 +74,23 @@ def generate_insight_huggingface(user_question, df):
         st.error("Erro ao ler o token da API. Verifique os seus 'Secrets'.")
         return None
 
-    # NOVIDADE: O Filtro Inteligente de Contexto decide o que enviar para a IA
     relevant_data = filter_relevant_data(df, user_question)
     
     if relevant_data is not None:
         st.info(f"Filtro Inteligente: {len(relevant_data)} registos relevantes encontrados para a sua pergunta.")
         context_data = relevant_data.to_csv(index=False)
-        system_prompt = "Você é um analista de dados de elite. Analise os DADOS FILTRADOS em formato CSV abaixo, que são altamente relevantes para a pergunta do utilizador, e formule uma resposta detalhada e factual."
-        user_prompt_content = f"Com base **exclusivamente** nos dados filtrados abaixo, responda à pergunta: {user_question}\n\n--- DADOS FILTRADOS ---\n{context_data}"
+        # ALTERAÇÃO: Instruções refinadas para um contexto policial.
+        system_prompt = """Você é um assistente de inteligência policial. A sua missão é analisar denúncias e colaborações de cidadãos para identificar potenciais atividades criminosas e fornecer resumos objetivos para agentes da lei.
+Analise os DADOS FILTRADOS em formato CSV abaixo, que são denúncias relevantes para a pergunta do agente.
+Formule uma resposta detalhada, objetiva e factual, focada em extrair informações úteis para uma investigação. A sua análise é confidencial e para uso exclusivo da polícia."""
+        user_prompt_content = f"Com base **exclusivamente** nos dados filtrados abaixo, responda à pergunta do agente: {user_question}\n\n--- DADOS FILTRADOS ---\n{context_data}"
     else:
         st.info("A sua pergunta é geral. A IA irá usar um resumo estatístico para responder.")
         context_data = get_data_summary(df)
-        system_prompt = "Você é um analista de dados de elite. Analise o RESUMO ESTATÍSTICO abaixo e use-o para responder à pergunta do utilizador de forma clara e profissional."
-        user_prompt_content = f"Com base **exclusivamente** no resumo abaixo, responda à pergunta: {user_question}\n\n--- RESUMO ESTATÍSTICO ---\n{context_data}"
+        # ALTERAÇÃO: Instruções refinadas para um contexto policial.
+        system_prompt = """Você é um assistente de inteligência policial. A sua missão é analisar dados para identificar tendências e padrões em colaborações de cidadãos.
+Analise o RESUMO ESTATÍSTICO abaixo e use-o para responder à pergunta do agente de forma clara e profissional, focada em insights de segurança pública."""
+        user_prompt_content = f"Com base **exclusivamente** no resumo abaixo, responda à pergunta do agente: {user_question}\n\n--- RESUMO ESTATÍSTICO ---\n{context_data}"
 
     messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt_content}]
 
@@ -130,7 +129,7 @@ if st.button("Gerar Insight"):
                 st.info("Nenhum registo encontrado na base de dados.")
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registos encontrados.")
-                with st.spinner("O Filtro Inteligente está a processar a sua pergunta e a contactar a IA..."):
+                with st.spinner("O Filtro Inteligente está a processar a sua pergunta и a contactar a IA..."):
                     insight = generate_insight_huggingface(user_question, dados_df)
                 if insight:
                     st.subheader("Análise Gerada pela IA:")
