@@ -44,6 +44,15 @@ def build_prompt(user_question, df):
     """
     return prompt
 
+def list_available_models():
+    """Lista os modelos disponíveis que a chave de API pode usar."""
+    try:
+        genai.configure(api_key=st.secrets["google_api"]["key"])
+        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        return models
+    except Exception as e:
+        return [f"Erro ao listar modelos: {e}"]
+
 def generate_insight(prompt, model_name):
     """Envia o prompt para a API do Gemini usando um nome de modelo específico."""
     try:
@@ -77,15 +86,35 @@ if st.button("Gerar Insight"):
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registros encontrados.")
                 
-                # Etapa 2: Gerar o insight diretamente com o modelo 'gemini-pro'
-                model_to_use = 'gemini-pro'
-                st.info(f"Usando o modelo: `{model_to_use}`")
+                # Etapa 2: Verificar quais modelos a API Key pode usar
+                with st.spinner("Verificando permissões da API Key e modelos disponíveis..."):
+                    available_models = list_available_models()
 
-                with st.spinner("A IA está pensando... Gerando seu insight agora."):
-                    prompt = build_prompt(user_question, dados_df)
-                    insight = generate_insight(prompt, model_to_use)
+                # Etapa 3: Tentar gerar o insight se houver modelos disponíveis
+                if available_models and not available_models[0].startswith("Erro"):
+                    model_to_use = available_models[0]
+                    st.info(f"Usando o primeiro modelo disponível que sua API permite: `{model_to_use}`")
 
-                if insight:
-                    st.subheader("Análise Gerada pela IA:")
-                    st.markdown(insight)
+                    with st.spinner("A IA está pensando... Gerando seu insight agora."):
+                        prompt = build_prompt(user_question, dados_df)
+                        insight = generate_insight(prompt, model_to_use)
+
+                    if insight:
+                        st.subheader("Análise Gerada pela IA:")
+                        st.markdown(insight)
+                else:
+                    # Se não houver modelos ou ocorrer um erro, exibir mensagem detalhada
+                    st.error("**Falha na verificação da API do Google Gemini!**")
+                    st.write("Sua chave de API não conseguiu listar nenhum modelo disponível.")
+                    st.write("**Causa Provável:**")
+                    st.markdown("""
+                    - O **Faturamento (Billing)** não está **ATIVO** para o projeto Google Cloud associado à sua chave de API.
+                    """)
+                    st.write("**Solução:**")
+                    st.markdown("""
+                    - Acesse o [Google Cloud Console](https://console.cloud.google.com/) e ative o faturamento para o seu projeto.
+                    """)
+                    if available_models:
+                        st.write("Detalhes do erro retornado pela API:")
+                        st.code(available_models[0])
 
