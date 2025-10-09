@@ -1,5 +1,5 @@
 import streamlit as st
-import mysql.connector # IMPORTANTE: Trocado de psycopg2 para mysql.connector
+import mysql.connector
 import pandas as pd
 import google.generativeai as genai
 
@@ -17,19 +17,20 @@ def fetch_data_from_db():
     try:
         # Conecta ao banco usando as credenciais para MySQL salvas em st.secrets
         conn = mysql.connector.connect(**st.secrets["mysql"])
-        
+
         # A query SQL é compatível com MySQL
         query = "SELECT * FROM colaboracoes WHERE created_at >= NOW() - INTERVAL 90 DAY;"
-        
+
         # Usar o Pandas para ler o SQL diretamente é mais eficiente
         df = pd.read_sql(query, conn)
         
         conn.close()
         return df
         
-    except mysql.connector.Error as e: # IMPORTANTE: Captura o erro específico do MySQL
+    except mysql.connector.Error as e:
         st.error(f"Erro de Conexão com o Banco de Dados MySQL: {e}")
-        st.info("Verifique se as credenciais no 'Secrets' (host, user, password, dbname) estão corretas e se o IP do Streamlit Cloud tem permissão de acesso remoto ao seu MySQL.")
+        # Mensagem de ajuda corrigida para 'database'
+        st.info("Verifique se as credenciais no 'Secrets' (host, user, password, database) estão corretas e se o IP do Streamlit Cloud tem permissão de acesso remoto ao seu MySQL.")
         return None
     except Exception as e:
         st.error(f"Ocorreu um erro inesperado ao buscar os dados: {e}")
@@ -56,7 +57,8 @@ def generate_insight(prompt):
     """Envia o prompt para a API do Gemini e retorna a resposta."""
     try:
         genai.configure(api_key=st.secrets["google_api"]["key"])
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        # CORREÇÃO: Alterado para 'gemini-pro' para máxima estabilidade e compatibilidade.
+        model = genai.GenerativeModel('gemini-pro')
         
         response = model.generate_content(prompt)
         return response.text
