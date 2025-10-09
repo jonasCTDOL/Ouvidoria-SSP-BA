@@ -1,7 +1,8 @@
 import streamlit as st
 import mysql.connector
 import pandas as pd
-import google.generativeai as genai
+import requests # Usado para fazer chamadas à API do Hugging Face
+import json
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -20,54 +21,61 @@ def fetch_data_from_db():
         df = pd.read_sql(query, conn)
         conn.close()
         return df
-    except mysql.connector.Error as e:
-        st.error(f"Erro de Conexão com o Banco de Dados MySQL: {e}")
-        st.info("Verifique se as credenciais no 'Secrets' (host, user, password, database) estão corretas e se o IP do Streamlit Cloud tem permissão de acesso remoto ao seu MySQL.")
-        return None
     except Exception as e:
-        st.error(f"Ocorreu um erro inesperado ao buscar os dados: {e}")
+        st.error(f"Ocorreu um erro ao conectar ou buscar dados: {e}")
         return None
 
 def build_prompt(user_question, df):
-    """Monta o prompt para o Gemini a partir da pergunta e dos dados."""
+    """Monta o prompt para um modelo de instrução a partir da pergunta e dos dados."""
     data_csv = df.to_csv(index=False)
+    # Modelos de instrução funcionam melhor com um formato claro de tarefa
     prompt = f"""
-    Você é um assistente de análise de dados especialista em segurança pública e colaboração cidadã.
-    Sua tarefa é analisar os dados brutos em formato CSV fornecidos abaixo e responder à pergunta do usuário.
-    Seja claro, objetivo e baseie sua resposta exclusivamente nos dados.
+[INST] Você é um assistente de análise de dados. Sua tarefa é analisar os dados em formato CSV abaixo e responder à pergunta do usuário de forma clara e concisa. Baseie sua resposta apenas nos dados fornecidos.
 
-    --- DADOS BRUTOS (últimos 90 dias) ---
-    {data_csv}
+--- DADOS ---
+{data_csv}
 
-    --- PERGUNTA DO USUÁRIO ---
-    Com base nos dados fornecidos, responda: {user_question}
-    """
+--- PERGUNTA ---
+{user_question} [/INST]
+"""
     return prompt
 
-def list_available_models():
-    """Lista os modelos disponíveis que a chave de API pode usar."""
+def generate_insight_huggingface(prompt):
+    """Envia o prompt para a API do Hugging Face e retorna a resposta."""
+    # Usaremos um modelo de instrução popular e de alto desempenho
+    model_url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+    
     try:
-        genai.configure(api_key=st.secrets["google_api"]["key"])
-        models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        return models
-    except Exception as e:
-        return [f"Erro ao listar modelos: {e}"]
+        api_token = st.secrets["huggingface_api"]["token"]
+        headers = {"Authorization": f"Bearer {api_token}"}
+        
+        payload = {"inputs": prompt}
+        
+        response = requests.post(model_url, headers=headers, json=payload)
+        
+        # Verifica se a resposta foi bem-sucedida
+        if response.status_code == 200:
+            # A resposta da API do Hugging Face vem numa lista
+            result = response.json()
+            # Pega o texto gerado do primeiro (e único) resultado
+            generated_text = result[0]['generated_text']
+            # O modelo repete o prompt na resposta, então removemos o prompt original
+            # para obter apenas a resposta da IA.
+            answer = generated_text.replace(prompt, "").strip()
+            return answer
+        else:
+            st.error(f"Erro ao chamar a API do Hugging Face: {response.status_code} - {response.text}")
+            return None
 
-def generate_insight(prompt, model_name):
-    """Envia o prompt para a API do Gemini usando um nome de modelo específico."""
-    try:
-        genai.configure(api_key=st.secrets["google_api"]["key"])
-        model = genai.GenerativeModel(model_name)
-        response = model.generate_content(prompt)
-        return response.text
     except Exception as e:
-        st.error(f"Erro ao chamar a API do Gemini com o modelo '{model_name}': {e}")
+        st.error(f"Ocorreu uma exceção ao chamar a API do Hugging Face: {e}")
         return None
 
 # --- INTERFACE DO USUÁRIO (UI) ---
 
 st.title("💡 Assistente de Análise de Colaborações")
-st.markdown("Faça uma pergunta em linguagem natural sobre as colaborações dos últimos 90 dias e a IA irá gerar um insight para você.")
+st.markdown("Faça uma pergunta sobre as colaborações dos últimos 90 dias e a IA irá gerar um insight para você.")
+st.info("ℹ️ Esta demonstração usa um modelo da comunidade Hugging Face. A primeira geração pode demorar um pouco mais.")
 
 default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum ('denuncia', 'sugestao', etc.)?"
 user_question = st.text_area("Sua pergunta:", value=default_question, height=100)
@@ -76,45 +84,20 @@ if st.button("Gerar Insight"):
     if not user_question:
         st.warning("Por favor, digite uma pergunta para análise.")
     else:
-        # Etapa 1: Buscar os dados do banco
         with st.spinner("Conectando ao banco de dados..."):
             dados_df = fetch_data_from_db()
 
         if dados_df is not None:
             if dados_df.empty:
-                st.info("Nenhum registro de colaboração encontrado nos últimos 90 dias.")
+                st.info("Nenhum registro encontrado nos últimos 90 dias.")
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registros encontrados.")
                 
-                # Etapa 2: Verificar quais modelos a API Key pode usar
-                with st.spinner("Verificando permissões da API Key e modelos disponíveis..."):
-                    available_models = list_available_models()
+                with st.spinner("A IA do Hugging Face está a processar... (pode demorar um pouco na primeira vez)"):
+                    prompt = build_prompt(user_question, dados_df)
+                    insight = generate_insight_huggingface(prompt)
 
-                # Etapa 3: Tentar gerar o insight se houver modelos disponíveis
-                if available_models and not available_models[0].startswith("Erro"):
-                    model_to_use = available_models[0]
-                    st.info(f"Usando o primeiro modelo disponível que sua API permite: `{model_to_use}`")
-
-                    with st.spinner("A IA está pensando... Gerando seu insight agora."):
-                        prompt = build_prompt(user_question, dados_df)
-                        insight = generate_insight(prompt, model_to_use)
-
-                    if insight:
-                        st.subheader("Análise Gerada pela IA:")
-                        st.markdown(insight)
-                else:
-                    # Se não houver modelos ou ocorrer um erro, exibir mensagem detalhada
-                    st.error("**Falha na verificação da API do Google Gemini!**")
-                    st.write("Sua chave de API não conseguiu listar nenhum modelo disponível.")
-                    st.write("**Causa Provável:**")
-                    st.markdown("""
-                    - O **Faturamento (Billing)** não está **ATIVO** para o projeto Google Cloud associado à sua chave de API.
-                    """)
-                    st.write("**Solução:**")
-                    st.markdown("""
-                    - Acesse o [Google Cloud Console](https://console.cloud.google.com/) e ative o faturamento para o seu projeto.
-                    """)
-                    if available_models:
-                        st.write("Detalhes do erro retornado pela API:")
-                        st.code(available_models[0])
+                if insight:
+                    st.subheader("Análise Gerada pela IA:")
+                    st.markdown(insight)
 
