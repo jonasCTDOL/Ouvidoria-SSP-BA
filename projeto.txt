@@ -1,0 +1,47 @@
+"Classificador de Manifestações" em HTML/CSS/JS, que se alinha ao seu projeto:
+💻 Prompt Protótipo para Geração de Site no Manus AI
+Copie e cole este texto no campo de prompt do Manus, ajustando as informações entre colchetes [ ] conforme necessário.
+**CONTEXTO:**
+Sou um desenvolvedor na Ouvidoria-Geral da SSP-BA e preciso de um **protótipo funcional** de um classificador para manifestações de cidadãos. O objetivo é testar a interface de classificação antes de integrar com o sistema de back-end.
+
+**OBJETIVO (Produto Final):**
+Gerar todos os arquivos necessários (HTML, CSS e JavaScript) para criar um **Web App de página única (SPA)** que classifique textos.
+
+**FUNCIONALIDADES OBRIGATÓRIAS:**
+1.  **Campo de Entrada:** Um campo de texto grande (textarea) para o usuário colar a manifestação do cidadão.
+2.  **Botão de Ação:** Um botão "Classificar Manifestação".
+3.  **Área de Resultados:** Uma seção limpa para exibir a **classificação sugerida** após o clique, no formato JSON.
+
+**ESPECIFICAÇÕES TÉCNICAS:**
+* **Front-end:** HTML5, CSS puro, e JavaScript (JS). **Não utilize React, Vue ou frameworks complexos.** O código deve ser leve e funcionar localmente no navegador.
+* **Design:** Design minimalista, com foco em usabilidade e cores institucionais. Use as cores da SSP-BA: Azul Escuro (`#003366`) para o cabeçalho e Amarelo Dourado (`#FFC300`) para os botões.
+
+**ETAPAS DE ENTREGA (Checklist para o Manus):**
+1.  Crie o arquivo **`index.html`** (estrutura básica e campo de entrada).
+2.  Crie o arquivo **`styles.css`** (estilização do layout e das cores).
+3.  Crie o arquivo **`script.js`** (lógica de classificação e exibição de resultados).
+4.  No arquivo `script.js`, **implemente apenas a função de interface `classificarTexto(texto)`**, que, por enquanto, deve retornar um **JSON simulado** para fins de prototipagem (não precisa de IA real, apenas simular a resposta).
+
+**JSON de Retorno SIMULADO (Modelo de Exemplo):**
+O JSON de saída deve ter a seguinte estrutura (simulada):
+
+```json
+{
+  "especie_sugerida": "RECLAMAÇÃO",
+  "natureza_sugerida": "ATENDIMENTO_RUIM", 
+  "confianca": "média",
+  "justificativa": "Texto classificado como reclamação devido à insatisfação com a demora.",
+  "elementos_identificados": ["demora_prazo", "insatisfação"]
+}
+
+ENTREGA FINAL (OUTPUT):
+Gere um pacote ZIP contendo os três arquivos (index.html, styles.css, script.js) e forneça o link para download no Workspace do Manus.
+
+---
+
+## Por que este prompt é eficaz no Manus AI
+
+* **Define o Papel (`CONTEXTO`):** Ajuda a IA a entender a finalidade do projeto (Ouvidoria, protótipo).
+* **Evita Complexidade (`ESPECIFICAÇÕES TÉCNICAS`):** Ao proibir frameworks, você garante que o Manus utilize modelos mais simples (e potencialmente **menos custosos em créditos**) focados em HTML/CSS/JS puros.
+* **Entrega Estruturada (`ETAPAS DE ENTREGA`):** O checklist força o Manus a seguir uma sequência lógica e produzir os arquivos separados que você precisa.
+* **Simulação (Ganho de Crédito):** Ao pedir um **JSON simulado** no `script.js`, você evita que o Manus tente implementar uma lógica de IA real no JavaScript do cliente, que seria impossível ou excessivamente complexa, economizando créditos.
