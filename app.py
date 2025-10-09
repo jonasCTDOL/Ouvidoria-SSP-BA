@@ -41,41 +41,55 @@ def build_prompt(user_question, df):
     return prompt
 
 def generate_insight_huggingface(prompt):
-    """Envia o prompt para a API do Hugging Face e retorna a resposta."""
-    # CORREÇÃO: Trocado para um modelo alternativo e robusto da MistralAI.
-    model_url = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1"
+    """
+    Envia o prompt para a API do Hugging Face, tentando uma lista de modelos
+    até encontrar um que responda com sucesso.
+    """
+    # Lista de modelos confiáveis para tentar em ordem de preferência.
+    candidate_models = [
+        "meta-llama/Meta-Llama-3-8B-Instruct",
+        "google/gemma-2-9b-it",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1",
+        "mistralai/Mistral-7B-Instruct-v0.2"
+    ]
     
-    try:
-        api_token = st.secrets["huggingface_api"]["token"]
-        headers = {"Authorization": f"Bearer {api_token}"}
-        
-        payload = {"inputs": prompt}
-        
-        response = requests.post(model_url, headers=headers, json=payload)
-        
-        # Verifica se a resposta foi bem-sucedida
-        if response.status_code == 200:
-            # A resposta da API do Hugging Face vem numa lista
-            result = response.json()
-            # Pega o texto gerado do primeiro (e único) resultado
-            generated_text = result[0]['generated_text']
-            # O modelo repete o prompt na resposta, então removemos o prompt original
-            # para obter apenas a resposta da IA.
-            answer = generated_text.replace(prompt, "").strip()
-            return answer
-        else:
-            st.error(f"Erro ao chamar a API do Hugging Face: {response.status_code} - {response.text}")
-            return None
+    api_token = st.secrets["huggingface_api"]["token"]
+    headers = {"Authorization": f"Bearer {api_token}"}
+    payload = {"inputs": prompt}
 
-    except Exception as e:
-        st.error(f"Ocorreu uma exceção ao chamar a API do Hugging Face: {e}")
-        return None
+    for model_id in candidate_models:
+        model_url = f"https://api-inference.huggingface.co/models/{model_id}"
+        st.info(f"A testar o modelo de IA: {model_id}...")
+        
+        try:
+            # Adicionado um timeout para evitar que a aplicação fique presa
+            response = requests.post(model_url, headers=headers, json=payload, timeout=60)
+            
+            if response.status_code == 200:
+                st.success(f"Modelo '{model_id}' respondeu com sucesso!")
+                result = response.json()
+                generated_text = result[0]['generated_text']
+                answer = generated_text.replace(prompt, "").strip()
+                return answer
+            elif response.status_code == 503: # Erro comum quando o modelo está a carregar
+                 st.warning(f"O modelo '{model_id}' está a carregar. A tentar o próximo...")
+                 continue
+            else:
+                 st.warning(f"O modelo '{model_id}' falhou com o código {response.status_code}. A tentar o próximo...")
+
+        except requests.exceptions.RequestException as e:
+            st.warning(f"Erro de rede ao tentar o modelo '{model_id}': {e}. A tentar o próximo...")
+            continue
+    
+    # Se o loop terminar sem que nenhum modelo tenha respondido
+    st.error("Não foi possível obter uma resposta de nenhum dos modelos de IA disponíveis. Por favor, tente novamente mais tarde.")
+    return None
 
 # --- INTERFACE DO USUÁRIO (UI) ---
 
 st.title("💡 Assistente de Análise de Colaborações")
 st.markdown("Faça uma pergunta sobre as colaborações dos últimos 90 dias e a IA irá gerar um insight para você.")
-st.info("ℹ️ Esta demonstração usa um modelo da comunidade Hugging Face. A primeira geração pode demorar um pouco mais.")
+st.info("ℹ️ Esta demonstração usa modelos da comunidade Hugging Face. A primeira geração pode demorar um pouco mais enquanto o modelo é carregado.")
 
 default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum ('denuncia', 'sugestao', etc.)?"
 user_question = st.text_area("Sua pergunta:", value=default_question, height=100)
@@ -93,7 +107,8 @@ if st.button("Gerar Insight"):
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registros encontrados.")
                 
-                with st.spinner("A IA do Hugging Face está a processar... (pode demorar um pouco na primeira vez)"):
+                # O spinner agora é mais genérico, pois a função interna dará o feedback
+                with st.spinner("A contactar os modelos de IA do Hugging Face..."):
                     prompt = build_prompt(user_question, dados_df)
                     insight = generate_insight_huggingface(prompt)
 
