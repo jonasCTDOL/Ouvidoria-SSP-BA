@@ -1,8 +1,7 @@
 import streamlit as st
 import mysql.connector
 import pandas as pd
-import requests
-from huggingface_hub import InferenceClient # Importa o cliente oficial do Hugging Face
+from huggingface_hub import InferenceClient
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -14,23 +13,46 @@ st.set_page_config(
 
 @st.cache_data(ttl=3600)
 def fetch_data_from_db():
-    """Conecta-se à base de dados MySQL usando os segredos e busca todos os dados."""
+    """Conecta-se à base de dados MySQL e busca todos os dados."""
     try:
         conn = mysql.connector.connect(**st.secrets["mysql"])
         query = "SELECT * FROM colaboracoes;"
         df = pd.read_sql(query, conn)
         conn.close()
+        # Converte colunas de data para um formato mais legível
+        if 'created_at' in df.columns:
+            df['created_at'] = pd.to_datetime(df['created_at']).dt.date
         return df
     except Exception as e:
         st.error(f"Ocorreu um erro ao conectar-se ou buscar dados: {e}")
         return None
 
+def get_data_summary(df):
+    """Cria um resumo estatístico e informativo do DataFrame."""
+    summary_parts = []
+    
+    summary_parts.append(f"Resumo Geral do Conjunto de Dados:")
+    summary_parts.append(f"- Número total de colaborações: {len(df)}")
+    
+    if 'created_at' in df.columns:
+        summary_parts.append(f"- Período dos dados: de {df['created_at'].min()} a {df['created_at'].max()}")
+        
+    summary_parts.append("\nAnálise das Colunas Principais:")
+    
+    # Descreve as colunas mais importantes de forma legível
+    for col in ['tipo_colaboracao', 'cidade', 'estado', 'status', 'anonimato']:
+        if col in df.columns:
+            summary_parts.append(f"\n- Coluna '{col}':")
+            # Mostra a contagem dos valores mais comuns
+            value_counts = df[col].value_counts().to_string()
+            summary_parts.append(value_counts)
+            
+    return "\n".join(summary_parts)
+
 def generate_insight_huggingface(user_question, df):
     """
-    Envia o prompt para a API do Hugging Face usando o método de conversação correto
-    e instruções refinadas para evitar alucinações.
+    Envia um resumo dos dados para a API do Hugging Face para obter uma resposta inteligente.
     """
-    # ALTERAÇÃO: Prioriza os modelos mais poderosos que o utilizador já autorizou.
     candidate_models = [
         "meta-llama/Meta-Llama-3-8B-Instruct",
         "google/gemma-2-9b-it",
@@ -45,23 +67,18 @@ def generate_insight_huggingface(user_question, df):
         st.error("Erro ao ler o token da API. Verifique a secção `[huggingface_api]` nos seus 'Secrets'.")
         return None
 
-    data_csv = df.to_csv(index=False)
+    # NOVIDADE: Gera um resumo inteligente em vez de usar os dados brutos.
+    data_summary = get_data_summary(df)
 
-    # ALTERAÇÃO: Instruções do sistema muito mais rigorosas e detalhadas.
-    system_prompt = """Você é um analista de dados de elite. A sua única função é analisar os dados em formato CSV que o utilizador fornece e responder à pergunta dele.
-    Siga estes passos rigorosamente:
-    1.  Leia atentamente a pergunta do utilizador para entender o objetivo.
-    2.  Examine os dados CSV fornecidos para encontrar as informações relevantes.
-    3.  Formule uma resposta clara, profissional e concisa, em português.
-    A sua resposta deve ser baseada **exclusivamente** nos dados. Não invente informações. Não gere código. Não inclua a sua reflexão sobre os passos, apenas a resposta final."""
+    system_prompt = """Você é um analista de dados de elite. A sua única função é analisar o resumo estatístico que o utilizador fornece e responder à pergunta dele de forma clara e profissional, em português. Baseie a sua resposta **exclusivamente** no resumo. Não invente informações."""
 
     user_prompt = f"""
-Aqui estão os dados para análise:
---- DADOS CSV ---
-{data_csv}
+Aqui está um resumo estatístico dos dados de colaborações:
+--- RESUMO DOS DADOS ---
+{data_summary}
 
---- PERGUNTA ---
-Com base **exclusivamente** nos dados acima, responda à seguinte pergunta: {user_question}
+--- PERGUNTA DO UTILIZADOR ---
+Com base **exclusivamente** no resumo acima, responda à seguinte pergunta: {user_question}
 """
 
     messages = [
@@ -74,11 +91,10 @@ Com base **exclusivamente** nos dados acima, responda à seguinte pergunta: {use
         
         try:
             client = InferenceClient(model=model_id, token=api_token)
-            # ALTERAÇÃO: Adicionado 'temperature' para reduzir a aleatoriedade e 'top_p' para focar em respostas prováveis.
             response = client.chat_completion(
                 messages=messages,
                 max_tokens=1024,
-                temperature=0.5, 
+                temperature=0.3, # Diminuído para respostas ainda mais factuais
                 top_p=0.95
             )
             
@@ -90,7 +106,7 @@ Com base **exclusivamente** nos dados acima, responda à seguinte pergunta: {use
         except Exception as e:
             error_message = str(e)
             if "401" in error_message:
-                 st.error(f"Erro de Autenticação (401) com o modelo '{model_id}'. O seu token de API é inválido. Por favor, verifique-o nos 'Secrets'.")
+                 st.error(f"Erro de Autenticação (401) com o modelo '{model_id}'. O seu token de API é inválido.")
                  return None
             else:
                  st.warning(f"O modelo '{model_id}' falhou com um erro: {error_message}. A tentar o próximo modelo...")
@@ -103,9 +119,9 @@ Com base **exclusivamente** nos dados acima, responda à seguinte pergunta: {use
 
 st.title("💡 Assistente de Análise de Colaborações")
 st.markdown("Faça uma pergunta sobre o **histórico completo** de colaborações e a IA irá gerar um insight para si.")
-st.info("ℹ️ Esta demonstração usa modelos da comunidade Hugging Face. A primeira geração pode demorar mais enquanto o modelo é carregado.")
+st.info("ℹ️ A aplicação faz agora uma pré-análise inteligente dos dados para respostas mais precisas.")
 
-default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum ('denuncia', 'sugestao', etc.)?"
+default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum?"
 user_question = st.text_area("A sua pergunta:", value=default_question, height=100)
 
 if st.button("Gerar Insight"):
@@ -120,10 +136,8 @@ if st.button("Gerar Insight"):
                 st.info("Nenhum registo encontrado na base de dados.")
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registos encontrados.")
-                st.warning(f"A analisar o histórico completo de {len(dados_df)} colaborações. A geração da resposta pode demorar mais tempo.")
                 
-                with st.spinner("A contactar os modelos de IA do Hugging Face..."):
-                    # ALTERAÇÃO: Removida a função 'build_user_prompt' e a chamada foi simplificada.
+                with st.spinner("O pré-analista inteligente está a resumir os dados e a contactar a IA..."):
                     insight = generate_insight_huggingface(user_question, dados_df)
 
                 if insight:
