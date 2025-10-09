@@ -42,8 +42,8 @@ def build_prompt(user_question, df):
 
 def generate_insight_huggingface(prompt):
     """Envia o prompt para a API do Hugging Face e retorna a resposta."""
-    # Usaremos um modelo de instrução popular e de alto desempenho
-    model_url = "https://api-inference.huggingface.co/models/mistralai/Mistral-7B-Instruct-v0.2"
+    # CORREÇÃO: Trocado para um modelo alternativo e robusto da MistralAI.
+    model_url = "https://api-inference.huggingface.co/models/mistralai/Mixtral-8x7B-Instruct-v0.1"
     
     try:
         api_token = st.secrets["huggingface_api"]["token"]
