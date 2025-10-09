@@ -27,9 +27,31 @@ def fetch_data_from_db():
         st.error(f"Ocorreu um erro ao conectar-se ou buscar dados: {e}")
         return None
 
+def get_data_summary(df):
+    """Cria um resumo estatístico e informativo do DataFrame."""
+    summary_parts = []
+    
+    summary_parts.append(f"Resumo Geral do Conjunto de Dados:")
+    summary_parts.append(f"- Número total de colaborações: {len(df)}")
+    
+    if 'created_at' in df.columns and not df['created_at'].empty:
+        summary_parts.append(f"- Período dos dados: de {df['created_at'].min()} a {df['created_at'].max()}")
+        
+    summary_parts.append("\nAnálise das Colunas Principais:")
+    
+    # Descreve as colunas mais importantes de forma legível
+    for col in ['tipo_colaboracao', 'cidade', 'estado', 'status', 'anonimato']:
+        if col in df.columns:
+            summary_parts.append(f"\n- Contagem de valores para a coluna '{col}':")
+            # Mostra a contagem dos valores mais comuns
+            value_counts = df[col].value_counts().to_string()
+            summary_parts.append(value_counts)
+            
+    return "\n".join(summary_parts)
+
 def generate_insight_huggingface(user_question, df):
     """
-    Envia os dados completos para a API do Hugging Face para obter uma resposta inteligente e profunda.
+    Envia um resumo dos dados para a API do Hugging Face para obter uma resposta inteligente.
     """
     candidate_models = [
         "meta-llama/Meta-Llama-3-8B-Instruct",
@@ -45,24 +67,18 @@ def generate_insight_huggingface(user_question, df):
         st.error("Erro ao ler o token da API. Verifique a secção `[huggingface_api]` nos seus 'Secrets'.")
         return None
 
-    # ALTERAÇÃO: Voltamos a usar o CSV completo para uma análise profunda.
-    data_csv = df.to_csv(index=False)
+    # NOVIDADE: Gera um resumo inteligente em vez de usar os dados brutos.
+    data_summary = get_data_summary(df)
 
-    # ALTERAÇÃO: Instruções do sistema muito mais rigorosas e detalhadas.
-    system_prompt = """Você é um analista de dados de elite. A sua única função é analisar os dados em formato CSV que o utilizador fornece e responder à pergunta dele de forma clara, profissional e detalhada, em português.
-Siga estes passos rigorosamente:
-1.  Leia atentamente a pergunta do utilizador para entender o objetivo da análise.
-2.  Examine **todas as colunas** dos dados CSV fornecidos para encontrar as informações relevantes, prestando especial atenção a colunas de texto livre como 'descricao' e 'observacoes'.
-3.  Formule uma resposta completa e baseada em factos. Se a pergunta for sobre um tema específico, procure por palavras-chave relevantes nos dados.
-A sua resposta deve ser baseada **exclusivamente** nos dados. Não invente informações. Não gere código."""
+    system_prompt = """Você é um analista de dados de elite. A sua única função é analisar o resumo estatístico que o utilizador fornece e responder à pergunta dele de forma clara e profissional, em português. Baseie a sua resposta **exclusivamente** no resumo. Não invente informações."""
 
     user_prompt = f"""
-Aqui estão os dados completos para análise:
---- DADOS CSV ---
-{data_csv}
+Aqui está um resumo estatístico dos dados de colaborações:
+--- RESUMO DOS DADOS ---
+{data_summary}
 
 --- PERGUNTA DO UTILIZADOR ---
-Com base **exclusivamente** em todos os dados acima, responda à seguinte pergunta: {user_question}
+Com base **exclusivamente** no resumo acima, responda à seguinte pergunta: {user_question}
 """
 
     messages = [
@@ -78,7 +94,7 @@ Com base **exclusivamente** em todos os dados acima, responda à seguinte pergun
             response = client.chat_completion(
                 messages=messages,
                 max_tokens=1024,
-                temperature=0.3, # Mantém a temperatura baixa para respostas factuais
+                temperature=0.3, # Diminuído para respostas ainda mais factuais
                 top_p=0.95
             )
             
@@ -103,8 +119,7 @@ Com base **exclusivamente** em todos os dados acima, responda à seguinte pergun
 
 st.title("💡 Assistente de Análise de Colaborações")
 st.markdown("Faça uma pergunta sobre o **histórico completo** de colaborações e a IA irá gerar um insight para si.")
-# ALTERAÇÃO: Mensagem de informação atualizada.
-st.info("ℹ️ A aplicação envia agora todos os dados para a IA para permitir respostas mais profundas e precisas.")
+st.info("ℹ️ A aplicação faz agora uma pré-análise inteligente dos dados para respostas mais precisas.")
 
 default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum?"
 user_question = st.text_area("A sua pergunta:", value=default_question, height=100)
@@ -122,8 +137,7 @@ if st.button("Gerar Insight"):
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registos encontrados.")
                 
-                # ALTERAÇÃO: Mensagem do spinner atualizada.
-                with st.spinner("A enviar os dados completos para a IA e a aguardar a análise..."):
+                with st.spinner("O pré-analista inteligente está a resumir os dados e a contactar a IA..."):
                     insight = generate_insight_huggingface(user_question, dados_df)
 
                 if insight:
