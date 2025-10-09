@@ -29,57 +29,70 @@ def build_prompt(user_question, df):
     """Monta o prompt para um modelo de instrução a partir da pergunta e dos dados."""
     data_csv = df.to_csv(index=False)
     prompt = f"""
-Analyze the data below and answer the user's question.
+[INST] Você é um assistente de análise de dados. Sua tarefa é analisar os dados em formato CSV abaixo e responder à pergunta do usuário de forma clara e concisa. Baseie sua resposta apenas nos dados fornecidos.
 
---- DATA ---
+--- DADOS ---
 {data_csv}
 
---- QUESTION ---
-{user_question}
+--- PERGUNTA ---
+{user_question} [/INST]
 """
     return prompt
 
 def generate_insight_huggingface(prompt):
     """
-    Tenta usar o modelo 'gpt2' como um teste de diagnóstico definitivo.
+    Envia o prompt para a API do Hugging Face, tentando uma lista de modelos
+    e fornecendo diagnósticos de erro detalhados.
     """
-    model_id = "gpt2" # Usando o modelo mais básico e universal para teste
-    model_url = f"https://api-inference.huggingface.co/models/{model_id}"
-    
-    st.info(f"A realizar um teste de diagnóstico com o modelo: {model_id}...")
+    candidate_models = [
+        "HuggingFaceH4/zephyr-7b-beta",
+        "meta-llama/Meta-Llama-3-8B-Instruct",
+        "google/gemma-2-9b-it",
+        "mistralai/Mixtral-8x7B-Instruct-v0.1"
+    ]
     
     try:
         api_token = st.secrets["huggingface_api"]["token"]
         headers = {"Authorization": f"Bearer {api_token}"}
-        
-        payload = {
-            "inputs": prompt,
-            "options": {"wait_for_model": True}
-        }
-        
-        response = requests.post(model_url, headers=headers, json=payload, timeout=60)
-        
-        if response.status_code == 200:
-            st.success(f"Modelo '{model_id}' respondeu com sucesso! A conexão está a funcionar.")
-            result = response.json()
-            generated_text = result[0]['generated_text']
-            answer = generated_text.replace(prompt, "").strip()
-            return answer
-        else:
-            # Mostra uma mensagem de erro muito mais detalhada
-            st.error(f"O teste de diagnóstico falhou com o código {response.status_code}.")
-            st.error(f"Resposta completa da API: {response.text}")
-            st.warning("Isto indica um problema com o seu token de API nos 'Secrets' do Streamlit ou um bloqueio de rede. Por favor, verifique se o token foi copiado corretamente, sem espaços extra.")
-            return None
-
     except Exception as e:
-        st.error(f"Ocorreu uma exceção ao chamar a API: {e}")
+        st.error("Erro ao ler o token da API. Verifique se a secção `[huggingface_api]` com a chave `token` existe nos seus 'Secrets' do Streamlit.")
         return None
+
+    for model_id in candidate_models:
+        model_url = f"https://api-inference.huggingface.co/models/{model_id}"
+        st.info(f"A testar o modelo de IA: {model_id}...")
+        
+        try:
+            payload = {
+                "inputs": prompt,
+                "options": {"wait_for_model": True}
+            }
+            response = requests.post(model_url, headers=headers, json=payload, timeout=90)
+            
+            if response.status_code == 200:
+                st.success(f"Modelo '{model_id}' respondeu com sucesso!")
+                result = response.json()
+                generated_text = result[0]['generated_text']
+                answer = generated_text.replace(prompt, "").strip()
+                return answer
+            elif response.status_code == 401:
+                st.error("Erro de Autenticação (401). O seu token de API do Hugging Face é inválido ou foi copiado incorretamente. Por favor, gere um novo token, copie-o com cuidado e atualize os 'Secrets' no Streamlit.")
+                return None # Para de tentar se a autenticação falhar
+            else:
+                 st.warning(f"O modelo '{model_id}' falhou com o código {response.status_code}. Resposta: {response.text}. A tentar o próximo modelo...")
+
+        except requests.exceptions.RequestException as e:
+            st.warning(f"Erro de rede ao tentar o modelo '{model_id}': {e}. A tentar o próximo...")
+            continue
+    
+    st.error("Não foi possível obter uma resposta de nenhum dos modelos de IA disponíveis. Por favor, tente novamente mais tarde.")
+    return None
 
 # --- INTERFACE DO USUÁRIO (UI) ---
 
 st.title("💡 Assistente de Análise de Colaborações")
 st.markdown("Faça uma pergunta sobre as colaborações dos últimos 90 dias e a IA irá gerar um insight para você.")
+st.info("ℹ️ Esta demonstração usa modelos da comunidade Hugging Face. A primeira geração pode demorar mais enquanto o modelo é carregado.")
 
 default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum ('denuncia', 'sugestao', etc.)?"
 user_question = st.text_area("Sua pergunta:", value=default_question, height=100)
@@ -97,7 +110,7 @@ if st.button("Gerar Insight"):
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registros encontrados.")
                 
-                with st.spinner("A realizar teste de diagnóstico com a API do Hugging Face..."):
+                with st.spinner("A contactar os modelos de IA do Hugging Face..."):
                     prompt = build_prompt(user_question, dados_df)
                     insight = generate_insight_huggingface(prompt)
 
