@@ -9,7 +9,7 @@ st.set_page_config(
     page_icon="💡"
 )
 
-# --- FUNÇÕES DE LÓgica ---
+# --- FUNÇÕES DE LÓGICA ---
 
 @st.cache_data(ttl=3600)
 def fetch_data_from_db():
@@ -44,35 +44,32 @@ def build_prompt(user_question, df):
     """
     return prompt
 
-def generate_insight(prompt):
-    """Envia o prompt para a API do Gemini e retorna a resposta."""
-    try:
-        genai.configure(api_key=st.secrets["google_api"]["key"])
-        # CORREÇÃO 2: Usando o nome de modelo versionado 'gemini-1.0-pro' para máxima especificidade.
-        model = genai.GenerativeModel('gemini-1.0-pro')
-        response = model.generate_content(prompt)
-        return response.text
-    except Exception as e:
-        st.error(f"Erro ao chamar a API do Gemini: {e}")
-        return None
-
-# --- Ferramenta de Diagnóstico (NOVA) ---
 def list_available_models():
-    """Lista os modelos disponíveis para a chave de API configurada."""
+    """Lista os modelos disponíveis que a chave de API pode usar."""
     try:
         genai.configure(api_key=st.secrets["google_api"]["key"])
-        # Filtra para mostrar apenas modelos que podem gerar conteúdo, que é o que precisamos.
         models = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
         return models
     except Exception as e:
-        return [f"Erro ao tentar listar os modelos: {e}"]
+        # Retorna o erro como o único item da lista para tratamento
+        return [f"Erro ao listar modelos: {e}"]
+
+def generate_insight(prompt, model_name):
+    """Envia o prompt para a API do Gemini usando um nome de modelo específico."""
+    try:
+        genai.configure(api_key=st.secrets["google_api"]["key"])
+        model = genai.GenerativeModel(model_name)
+        response = model.generate_content(prompt)
+        return response.text
+    except Exception as e:
+        st.error(f"Erro ao chamar a API do Gemini com o modelo '{model_name}': {e}")
+        return None
 
 # --- INTERFACE DO USUÁRIO (UI) ---
 
 st.title("💡 Assistente de Análise de Colaborações")
 st.markdown("Faça uma pergunta em linguagem natural sobre as colaborações dos últimos 90 dias e a IA irá gerar um insight para você.")
 
-# Seção principal da aplicação
 default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum ('denuncia', 'sugestao', etc.)?"
 user_question = st.text_area("Sua pergunta:", value=default_question, height=100)
 
@@ -80,7 +77,8 @@ if st.button("Gerar Insight"):
     if not user_question:
         st.warning("Por favor, digite uma pergunta para análise.")
     else:
-        with st.spinner("Conectando ao banco de dados e buscando informações..."):
+        # Etapa 1: Buscar os dados do banco
+        with st.spinner("Conectando ao banco de dados..."):
             dados_df = fetch_data_from_db()
 
         if dados_df is not None:
@@ -88,22 +86,38 @@ if st.button("Gerar Insight"):
                 st.info("Nenhum registro de colaboração encontrado nos últimos 90 dias.")
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registros encontrados.")
-                with st.spinner("A IA está pensando... Gerando seu insight agora."):
-                    prompt = build_prompt(user_question, dados_df)
-                    insight = generate_insight(prompt)
-                if insight:
-                    st.subheader("Análise Gerada pela IA:")
-                    st.markdown(insight)
+                
+                # Etapa 2: Verificar quais modelos a API Key pode usar
+                with st.spinner("Verificando permissões da API Key..."):
+                    available_models = list_available_models()
 
-st.divider()
+                # Etapa 3: Tentar gerar o insight se houver modelos disponíveis
+                if available_models and not available_models[0].startswith("Erro"):
+                    model_to_use = available_models[0]
+                    st.info(f"Usando o primeiro modelo disponível: `{model_to_use}`")
 
-# Seção de diagnóstico expansível
-with st.expander("🔬 Ferramentas de Diagnóstico da API"):
-    st.write("Se estiver enfrentando erros com a API do Gemini, use esta ferramenta para verificar sua conexão.")
-    if st.button("Listar Modelos Disponíveis"):
-        with st.spinner("Consultando a API do Google para ver os modelos que sua chave pode acessar..."):
-            model_list = list_available_models()
-            st.write("Modelos que sua API Key pode usar para gerar conteúdo:")
-            st.json(model_list)
-            st.info("Se a lista estiver vazia ou mostrar um erro, verifique se a API 'Generative Language' e o Faturamento estão ativos no seu projeto Google Cloud.")
+                    with st.spinner("A IA está pensando... Gerando seu insight agora."):
+                        prompt = build_prompt(user_question, dados_df)
+                        insight = generate_insight(prompt, model_to_use)
+
+                    if insight:
+                        st.subheader("Análise Gerada pela IA:")
+                        st.markdown(insight)
+                else:
+                    # Se não houver modelos ou ocorrer um erro, exibir mensagem detalhada
+                    st.error("**Falha na verificação da API do Google Gemini!**")
+                    st.write("Sua chave de API não conseguiu listar os modelos disponíveis.")
+                    st.write("**Causa Provável:**")
+                    st.markdown("""
+                    1.  A **API "Generative Language"** (ou Vertex AI) não está **ATIVADA** no seu projeto Google Cloud.
+                    2.  O **Faturamento (Billing)** não está **ATIVO** para este projeto.
+                    """)
+                    st.write("**O que fazer:**")
+                    st.markdown("""
+                    1.  Acesse o [Google Cloud Console](https://console.cloud.google.com/).
+                    2.  Verifique se o faturamento e a API correta estão ativados para o projeto associado à sua chave.
+                    """)
+                    if available_models:
+                        st.write("Detalhes do erro retornado pela API:")
+                        st.code(available_models[0])
 
