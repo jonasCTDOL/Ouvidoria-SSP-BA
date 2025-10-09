@@ -54,6 +54,9 @@ def generate_insight_huggingface(prompt):
     try:
         api_token = st.secrets["huggingface_api"]["token"]
         headers = {"Authorization": f"Bearer {api_token}"}
+        # --- NOVO DIAGNÓSTICO ---
+        st.info(f"A usar o token que começa com '{api_token[:6]}' e termina com '{api_token[-4:]}'. Verifique se corresponde ao seu token no site do Hugging Face.")
+        # --- FIM DO DIAGNÓSTICO ---
     except Exception as e:
         st.error("Erro ao ler o token da API. Verifique se a secção `[huggingface_api]` com a chave `token` existe nos seus 'Secrets' do Streamlit.")
         return None
