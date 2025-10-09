@@ -13,7 +13,7 @@ def get_gemini_classification(api_key, text):
     """
     try:
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel('gemini-1.0-pro')
+        model = genai.GenerativeModel('gemini-1.5-pro-latest')
 
         # Prompt estruturado para guiar a IA a retornar o JSON no formato desejado
         prompt = f"""
