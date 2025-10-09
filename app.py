@@ -17,7 +17,6 @@ def fetch_data_from_db():
     """Conecta-se à base de dados MySQL usando os segredos e busca todos os dados."""
     try:
         conn = mysql.connector.connect(**st.secrets["mysql"])
-        # ALTERAÇÃO: A query agora busca todos os registos, sem o limite de 90 dias.
         query = "SELECT * FROM colaboracoes;"
         df = pd.read_sql(query, conn)
         conn.close()
@@ -26,29 +25,16 @@ def fetch_data_from_db():
         st.error(f"Ocorreu um erro ao conectar-se ou buscar dados: {e}")
         return None
 
-def build_user_prompt(user_question, df):
-    """Junta os dados e a pergunta do utilizador num único texto."""
-    data_csv = df.to_csv(index=False)
-    # Formato de prompt mais genérico para ser compatível com vários modelos
-    prompt = f"""
-Por favor, analise os seguintes dados em formato CSV e responda à pergunta do utilizador.
-
---- Dados ---
-{data_csv}
-
---- Pergunta ---
-{user_question}
-"""
-    return prompt
-
-def generate_insight_huggingface(prompt):
+def generate_insight_huggingface(user_question, df):
     """
-    Envia o prompt para a API do Hugging Face usando o método de conversação correto.
+    Envia o prompt para a API do Hugging Face usando o método de conversação correto
+    e instruções refinadas para evitar alucinações.
     """
+    # ALTERAÇÃO: Prioriza os modelos mais poderosos que o utilizador já autorizou.
     candidate_models = [
-        "HuggingFaceH4/zephyr-7b-beta",
         "meta-llama/Meta-Llama-3-8B-Instruct",
         "google/gemma-2-9b-it",
+        "HuggingFaceH4/zephyr-7b-beta",
         "mistralai/Mixtral-8x7B-Instruct-v0.1"
     ]
     
@@ -59,21 +45,43 @@ def generate_insight_huggingface(prompt):
         st.error("Erro ao ler o token da API. Verifique a secção `[huggingface_api]` nos seus 'Secrets'.")
         return None
 
-    # ALTERAÇÃO: Instruções do sistema mais diretas para evitar respostas erradas.
+    data_csv = df.to_csv(index=False)
+
+    # ALTERAÇÃO: Instruções do sistema muito mais rigorosas e detalhadas.
+    system_prompt = """Você é um analista de dados de elite. A sua única função é analisar os dados em formato CSV que o utilizador fornece e responder à pergunta dele.
+    Siga estes passos rigorosamente:
+    1.  Leia atentamente a pergunta do utilizador para entender o objetivo.
+    2.  Examine os dados CSV fornecidos para encontrar as informações relevantes.
+    3.  Formule uma resposta clara, profissional e concisa, em português.
+    A sua resposta deve ser baseada **exclusivamente** nos dados. Não invente informações. Não gere código. Não inclua a sua reflexão sobre os passos, apenas a resposta final."""
+
+    user_prompt = f"""
+Aqui estão os dados para análise:
+--- DADOS CSV ---
+{data_csv}
+
+--- PERGUNTA ---
+Com base **exclusivamente** nos dados acima, responda à seguinte pergunta: {user_question}
+"""
+
     messages = [
-        {"role": "system", "content": "É um assistente especialista em análise de dados. A sua única função é analisar os dados em formato CSV que o utilizador fornece e responder à pergunta dele. Baseie a sua resposta exclusivamente nos dados fornecidos. Não invente informações. Não gere código SQL. Analise os dados e resuma as suas descobertas em português."},
-        {"role": "user", "content": prompt}
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
     ]
 
     for model_id in candidate_models:
         st.info(f"A testar o modelo de IA: {model_id}...")
         
         try:
-            # Usando o cliente oficial com o método chat_completion
             client = InferenceClient(model=model_id, token=api_token)
-            response = client.chat_completion(messages=messages, max_tokens=1024) # Aumentado para respostas mais profundas
+            # ALTERAÇÃO: Adicionado 'temperature' para reduzir a aleatoriedade e 'top_p' para focar em respostas prováveis.
+            response = client.chat_completion(
+                messages=messages,
+                max_tokens=1024,
+                temperature=0.5, 
+                top_p=0.95
+            )
             
-            # Extrai a resposta da estrutura de conversação
             insight = response.choices[0].message.content
             
             st.success(f"Modelo '{model_id}' respondeu com sucesso!")
@@ -94,7 +102,6 @@ def generate_insight_huggingface(prompt):
 # --- INTERFACE DO UTILIZADOR (UI) ---
 
 st.title("💡 Assistente de Análise de Colaborações")
-# ALTERAÇÃO: Texto atualizado para refletir a análise completa.
 st.markdown("Faça uma pergunta sobre o **histórico completo** de colaborações e a IA irá gerar um insight para si.")
 st.info("ℹ️ Esta demonstração usa modelos da comunidade Hugging Face. A primeira geração pode demorar mais enquanto o modelo é carregado.")
 
@@ -113,12 +120,11 @@ if st.button("Gerar Insight"):
                 st.info("Nenhum registo encontrado na base de dados.")
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registos encontrados.")
-                # ALTERAÇÃO: Adicionado aviso sobre o tamanho dos dados.
                 st.warning(f"A analisar o histórico completo de {len(dados_df)} colaborações. A geração da resposta pode demorar mais tempo.")
                 
                 with st.spinner("A contactar os modelos de IA do Hugging Face..."):
-                    prompt = build_user_prompt(user_question, dados_df)
-                    insight = generate_insight_huggingface(prompt)
+                    # ALTERAÇÃO: Removida a função 'build_user_prompt' e a chamada foi simplificada.
+                    insight = generate_insight_huggingface(user_question, dados_df)
 
                 if insight:
                     st.subheader("Análise Gerada pela IA:")
