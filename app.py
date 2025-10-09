@@ -2,6 +2,7 @@ import streamlit as st
 import mysql.connector
 import pandas as pd
 from huggingface_hub import InferenceClient
+import re
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
@@ -19,7 +20,6 @@ def fetch_data_from_db():
         query = "SELECT * FROM colaboracoes;"
         df = pd.read_sql(query, conn)
         conn.close()
-        # Converte colunas de data para um formato mais legível
         if 'created_at' in df.columns:
             df['created_at'] = pd.to_datetime(df['created_at']).dt.date
         return df
@@ -27,84 +27,93 @@ def fetch_data_from_db():
         st.error(f"Ocorreu um erro ao conectar-se ou buscar dados: {e}")
         return None
 
+def get_data_summary(df):
+    """Cria um resumo estatístico e informativo do DataFrame para perguntas gerais."""
+    summary_parts = []
+    summary_parts.append(f"Resumo Geral: {len(df)} colaborações no total, de {df['created_at'].min()} a {df['created_at'].max()}.\n")
+    
+    for col in ['tipo_colaboracao', 'cidade', 'estado', 'status']:
+        if col in df.columns:
+            summary_parts.append(f"Contagem por '{col}':\n{df[col].value_counts().to_string()}\n")
+            
+    return "\n".join(summary_parts)
+
+def filter_relevant_data(df, question):
+    """
+    Filtra o DataFrame para encontrar apenas os registos relevantes para a pergunta do utilizador.
+    Se a pergunta for geral, retorna None para que um resumo seja usado.
+    """
+    # Palavras-chave que indicam uma pergunta geral
+    general_keywords = ['quantos', 'qual', 'resumo', 'geral', 'total', 'lista', 'liste', 'quais']
+    if any(keyword in question.lower() for keyword in general_keywords):
+        return None # Indica que é uma pergunta geral
+
+    # Extrai palavras-chave da pergunta
+    keywords = set(re.findall(r'\b\w{3,}\b', question.lower()))
+    
+    # Colunas onde procurar
+    search_cols = ['descricao', 'observacoes', 'cidade', 'bairro', 'rua', 'tipo_colaboracao']
+    
+    # Filtra o DataFrame
+    mask = pd.Series([False] * len(df))
+    for col in search_cols:
+        if col in df.columns:
+            # Garante que a coluna é do tipo string e lida com valores nulos
+            str_col = df[col].astype(str).str.lower()
+            for keyword in keywords:
+                mask |= str_col.str.contains(keyword, na=False)
+    
+    relevant_df = df[mask]
+    return relevant_df if not relevant_df.empty else None
+
 def generate_insight_huggingface(user_question, df):
     """
-    Envia os dados completos para a API do Hugging Face para obter uma resposta inteligente e profunda.
+    Envia um contexto otimizado (dados filtrados ou resumo) para a API para obter a melhor resposta.
     """
-    candidate_models = [
-        "meta-llama/Meta-Llama-3-8B-Instruct",
-        "google/gemma-2-9b-it",
-        "HuggingFaceH4/zephyr-7b-beta",
-        "mistralai/Mixtral-8x7B-Instruct-v0.1"
-    ]
+    candidate_models = ["meta-llama/Meta-Llama-3-8B-Instruct", "google/gemma-2-9b-it", "HuggingFaceH4/zephyr-7b-beta"]
     
     try:
         api_token = st.secrets["huggingface_api"]["token"]
         st.info(f"A usar o token que começa com '{api_token[:6]}' e termina com '{api_token[-4:]}'.")
     except Exception as e:
-        st.error("Erro ao ler o token da API. Verifique a secção `[huggingface_api]` nos seus 'Secrets'.")
+        st.error("Erro ao ler o token da API. Verifique os seus 'Secrets'.")
         return None
 
-    # ALTERAÇÃO: Voltamos a usar o CSV completo para uma análise profunda.
-    data_csv = df.to_csv(index=False)
+    # NOVIDADE: O Filtro Inteligente de Contexto decide o que enviar para a IA
+    relevant_data = filter_relevant_data(df, user_question)
+    
+    if relevant_data is not None:
+        st.info(f"Filtro Inteligente: {len(relevant_data)} registos relevantes encontrados para a sua pergunta.")
+        context_data = relevant_data.to_csv(index=False)
+        system_prompt = "Você é um analista de dados de elite. Analise os DADOS FILTRADOS em formato CSV abaixo, que são altamente relevantes para a pergunta do utilizador, e formule uma resposta detalhada e factual."
+        user_prompt_content = f"Com base **exclusivamente** nos dados filtrados abaixo, responda à pergunta: {user_question}\n\n--- DADOS FILTRADOS ---\n{context_data}"
+    else:
+        st.info("A sua pergunta é geral. A IA irá usar um resumo estatístico para responder.")
+        context_data = get_data_summary(df)
+        system_prompt = "Você é um analista de dados de elite. Analise o RESUMO ESTATÍSTICO abaixo e use-o para responder à pergunta do utilizador de forma clara e profissional."
+        user_prompt_content = f"Com base **exclusivamente** no resumo abaixo, responda à pergunta: {user_question}\n\n--- RESUMO ESTATÍSTICO ---\n{context_data}"
 
-    # ALTERAÇÃO: Instruções do sistema muito mais rigorosas e detalhadas.
-    system_prompt = """Você é um analista de dados de elite. A sua única função é analisar os dados em formato CSV que o utilizador fornece e responder à pergunta dele de forma clara, profissional e detalhada, em português.
-Siga estes passos rigorosamente:
-1.  Leia atentamente a pergunta do utilizador para entender o objetivo da análise.
-2.  Examine **todas as colunas** dos dados CSV fornecidos para encontrar as informações relevantes, prestando especial atenção a colunas de texto livre como 'descricao' e 'observacoes'.
-3.  Formule uma resposta completa e baseada em factos. Se a pergunta for sobre um tema específico, procure por palavras-chave relevantes nos dados.
-A sua resposta deve ser baseada **exclusivamente** nos dados. Não invente informações. Não gere código."""
-
-    user_prompt = f"""
-Aqui estão os dados completos para análise:
---- DADOS CSV ---
-{data_csv}
-
---- PERGUNTA DO UTILIZADOR ---
-Com base **exclusivamente** em todos os dados acima, responda à seguinte pergunta: {user_question}
-"""
-
-    messages = [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
+    messages = [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_prompt_content}]
 
     for model_id in candidate_models:
         st.info(f"A testar o modelo de IA: {model_id}...")
-        
         try:
             client = InferenceClient(model=model_id, token=api_token)
-            response = client.chat_completion(
-                messages=messages,
-                max_tokens=1024,
-                temperature=0.3, # Mantém a temperatura baixa para respostas factuais
-                top_p=0.95
-            )
-            
+            response = client.chat_completion(messages=messages, max_tokens=1024, temperature=0.3, top_p=0.95)
             insight = response.choices[0].message.content
-            
             st.success(f"Modelo '{model_id}' respondeu com sucesso!")
             return insight.strip()
-
         except Exception as e:
-            error_message = str(e)
-            if "401" in error_message:
-                 st.error(f"Erro de Autenticação (401) com o modelo '{model_id}'. O seu token de API é inválido.")
-                 return None
-            else:
-                 st.warning(f"O modelo '{model_id}' falhou com um erro: {error_message}. A tentar o próximo modelo...")
-            continue
+            st.warning(f"O modelo '{model_id}' falhou com um erro: {e}. A tentar o próximo modelo...")
     
-    st.error("Não foi possível obter uma resposta de nenhum dos modelos de IA disponíveis. Por favor, tente novamente mais tarde.")
+    st.error("Não foi possível obter uma resposta de nenhum dos modelos de IA disponíveis.")
     return None
 
 # --- INTERFACE DO UTILIZADOR (UI) ---
 
 st.title("💡 Assistente de Análise de Colaborações")
 st.markdown("Faça uma pergunta sobre o **histórico completo** de colaborações e a IA irá gerar um insight para si.")
-# ALTERAÇÃO: Mensagem de informação atualizada.
-st.info("ℹ️ A aplicação envia agora todos os dados para a IA para permitir respostas mais profundas e precisas.")
+st.info("ℹ️ A aplicação possui um **Filtro Inteligente** que analisa a sua pergunta para fornecer respostas mais precisas.")
 
 default_question = "Qual cidade teve mais colaborações e qual o tipo de colaboração mais comum?"
 user_question = st.text_area("A sua pergunta:", value=default_question, height=100)
@@ -121,11 +130,8 @@ if st.button("Gerar Insight"):
                 st.info("Nenhum registo encontrado na base de dados.")
             else:
                 st.success(f"Dados carregados! {len(dados_df)} registos encontrados.")
-                
-                # ALTERAÇÃO: Mensagem do spinner atualizada.
-                with st.spinner("A enviar os dados completos para a IA e a aguardar a análise..."):
+                with st.spinner("O Filtro Inteligente está a processar a sua pergunta e a contactar a IA..."):
                     insight = generate_insight_huggingface(user_question, dados_df)
-
                 if insight:
                     st.subheader("Análise Gerada pela IA:")
                     st.markdown(insight)
